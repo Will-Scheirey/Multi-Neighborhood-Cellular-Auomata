@@ -1,0 +1,150 @@
+#pragma kernel Update
+
+RWTexture2D<float4> Source;
+uint width, height;
+
+struct Node
+{
+	float lastState;
+	float currentState;
+	float nextState;
+};
+
+RWStructuredBuffer<Node> buffer;
+
+uint getCoord(uint2 id, uint2 o)
+{
+	return (height + id.y + o.y) % height + ((width + id.x + o.x) % width) * height;
+}
+
+
+float2 C(uint2 id, int2 r1, int2 r2)
+{
+	int2 sum = 0;
+	Node node;
+	float2 count = 0;
+	int maxSize = max(r1.y, r2.y);
+	for (int i = -maxSize; i <= maxSize; i++)
+	{
+		for (int j = -maxSize; j <= maxSize; j++)
+		{
+			int d = round(sqrt(i * i + j * j));
+			
+			if (d > r1.x && d <= r1.y)
+			{
+				node = buffer[getCoord(id, uint2(i, j))];
+				sum.x += node.lastState;
+				count.x++;
+			}
+			else if (d > r2.x && d <= r2.y)
+			{
+				node = buffer[getCoord(id, uint2(i, j))];
+				sum.y += node.lastState;
+				count.y++;
+			}
+		}
+	}
+	return float2((float) sum.x / count.x, (float) sum.y / count.y);
+}
+
+// RULE 1
+
+void rule1(inout Node node, uint2 id)
+{	
+	node.nextState = node.currentState;
+	
+	int2 n1 = int2(4, 7);
+	int2 n2 = int2(0, 3);
+	
+	float2 avg = C(id, n1, n2);
+	
+	if (avg.x >= 0.210 && avg.x <= 0.220) node.nextState = 1;
+	if (avg.x >= 0.350 && avg.x <= 0.500) node.nextState = 0;
+	if (avg.x >= 0.750 && avg.x <= 0.850) node.nextState = 0;
+	if (avg.y >= 0.100 && avg.y <= 0.280) node.nextState = 0;
+	if (avg.y >= 0.430 && avg.y <= 0.540) node.nextState = 1;
+	if (avg.y >= 0.720 && avg.y <= 0.820) node.nextState = 0;
+	if (avg.x >= 0.100 && avg.x <= 0.150) node.nextState = 0;
+	
+	node.lastState = node.currentState;
+	node.currentState = node.nextState;
+}
+
+//RULE 2
+
+void rule2(inout Node node, uint2 id)
+{
+	node.nextState = node.currentState;
+	
+	int2 n1 = int2(4, 7);
+	int2 n2 = int2(0, 3);
+	
+	float2 avg = C(id, n1, n2);
+	
+	float c1 = node.nextState;
+	float c2 = node.nextState;
+	
+	if (avg.x >= 0.185 && avg.x <= 0.200)
+		node.nextState = 1;
+	if (avg.x >= 0.343 && avg.x <= 0.580)
+		node.nextState = 0;
+	if (avg.x >= 0.500 && avg.x <= 0.900)
+		node.nextState = 0;
+	if (avg.y >= 0.150 && avg.y <= 0.280)
+		node.nextState = 0;
+	if (avg.y >= 0.500 && avg.y <= 0.600)
+		node.nextState = 1;
+	if (avg.x >= 0.150 && avg.x <= 0.180)
+		node.nextState = 0;
+	
+	
+	node.lastState = node.currentState;
+	node.currentState = node.nextState;
+}
+
+//RULE 3
+
+void rule3(inout Node node, uint2 id)
+{
+	node.nextState = node.currentState;
+	
+	int2 n1 = int2(4, 7);
+	int2 n2 = int2(1, 3);
+	
+	float2 avg = C(id, n1, n2);
+	
+	float c1 = 0.12;
+	float c2 = 0.03;
+	
+	float change = 0;
+
+	if (avg.x >= 0.300 && avg.x <= 0.400) change = c1;
+	if (avg.x >= 0.350 && avg.x <= 0.500) change =-c1;
+	if (avg.x >= 0.520 && avg.x <= 0.750) change =-c1;
+	if (avg.y >= 0.100 && avg.y <= 0.300) change =-c2;
+	if (avg.y >= 0.700 && avg.y <= 0.720) change =-c2;
+
+	node.nextState += change;
+	
+	node.nextState = max(0, node.nextState);
+	node.nextState = min(1, node.nextState);
+	
+	node.lastState = node.currentState;
+	node.currentState = node.nextState;
+}
+
+
+[numthreads(32,32,1)]
+void Update (uint3 id : SV_DispatchThreadID)
+{
+	if (id.x < 0 || id.x > width - 1 || id.y < 0 || id.y > height-1)
+		return;
+	
+	rule2(buffer[getCoord(id.xy, 0)], id.xy);
+	
+	float n = 0.9;
+	
+	Source[id.xy] = Source[id.xy] * n + buffer[getCoord(id.xy, 0)].nextState * (1 - n);
+	
+	Source[id.xy] = round(Source[id.xy] * 1000) / 1000;
+}
